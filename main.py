@@ -12,13 +12,19 @@ ollama_url = 'http://localhost:11434'
 # create an empty list to store all the models we have installed.
 model_list = []
 
-if requests.get(ollama_url).status_code == 200:
-    client = Client(host=ollama_url)
-    api_return = client.list()
-    for model in api_return['models']:
-        model_list.append(model['name'])
-else:
-    print("Ollama is not running")
+try:
+    response = requests.get(ollama_url, timeout=5)
+    if response.status_code == 200:
+        client = Client(host=ollama_url)
+        api_return = client.list()
+        for model in api_return['models']:
+            model_list.append(model['name'])
+    else:
+        print(f"Ollama server returned status code: {response.status_code}")
+        sys.exit(1)
+except requests.exceptions.RequestException as e:
+    print(f"Failed to connect to Ollama: {str(e)}")
+    print("Make sure Ollama is running with 'ollama serve'")
     sys.exit(1)
 
 
@@ -46,18 +52,22 @@ def request(gpt_model, state):
         gpt_model (str): The GPT model to use for the request.
         state (hd.state): The state object.
     """
-    response = client.chat(
-        model=gpt_model,
-        messages=[dict(role=m["role"], content=m["content"]) for m in state.messages],
-        stream=True,
-    )
+    try:
+        response = client.chat(
+            model=gpt_model,
+            messages=[dict(role=m["role"], content=m["content"]) for m in state.messages],
+            stream=True,
+        )
 
-    for chunk in response:
-        message = chunk['message']
-        state.current_reply += message.get("content", "")
+        for chunk in response:
+            message = chunk['message']
+            state.current_reply += message.get("content", "")
 
-    add_message("assistant", state.current_reply, state, gpt_model)
-    state.current_reply = ""
+        add_message("assistant", state.current_reply, state, gpt_model)
+        state.current_reply = ""
+    except Exception as e:
+        state.current_reply = f"Error: {str(e)}"
+        print(f"Chat request failed: {str(e)}")
 
 
 def render_user_message(content, gpt_model):
@@ -119,9 +129,9 @@ def main():
 
                 model = form.select(
                     options=model_list,
-                    value="tinyllama",
+                    value=model_list[0] if model_list else None,  # Use first available model
                     name="gpt-model",
-                    placeholder='tinyllama:latest'
+                    placeholder='Select a model'
                 )
 
             if form.submitted:
